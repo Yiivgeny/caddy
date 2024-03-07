@@ -15,6 +15,7 @@
 package caddyzstd
 
 import (
+	"github.com/dustin/go-humanize"
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/caddyserver/caddy/v2"
@@ -30,6 +31,8 @@ func init() {
 type Zstd struct {
 	// Compression level refer to type constants value from zstd.SpeedFastest to zstd.SpeedBestCompression
 	Level zstd.EncoderLevel `json:"level,omitempty"`
+
+	WindowSize *uint64 `json:"window_size"`
 }
 
 // CaddyModule returns the Caddy module information.
@@ -57,8 +60,30 @@ func (z *Zstd) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			zstd.SpeedBestCompression,
 		)
 	}
-
 	z.Level = level
+
+	if !d.NextArg() {
+		return nil
+	}
+	windowStr := d.Val()
+	size, err := humanize.ParseBytes(windowStr)
+	if err != nil {
+		return d.Errf("incorrect window size: %v", err)
+	}
+	z.WindowSize = &size
+
+	return nil
+}
+
+// Provision provisions g's configuration.
+func (z *Zstd) Provision(ctx caddy.Context) error {
+	if z.WindowSize == nil {
+		// The default of 8MB for the window is
+		// too large for many clients, so we limit
+		// it to 128K to lighten their load.
+		ws := uint64(128 << 10)
+		z.WindowSize = &ws
+	}
 	return nil
 }
 
@@ -68,16 +93,15 @@ func (Zstd) AcceptEncoding() string { return "zstd" }
 
 // NewEncoder returns a new Zstandard writer.
 func (z Zstd) NewEncoder() encode.Encoder {
-	// The default of 8MB for the window is
-	// too large for many clients, so we limit
-	// it to 128K to lighten their load.
-	writer, _ := zstd.NewWriter(
-		nil,
-		zstd.WithWindowSize(128<<10),
+	opts := []zstd.EOption{
 		zstd.WithEncoderConcurrency(1),
 		zstd.WithZeroFrames(true),
 		zstd.WithEncoderLevel(z.Level),
-	)
+	}
+	if *z.WindowSize > 0 {
+		opts = append(opts, zstd.WithWindowSize(int(*z.WindowSize)))
+	}
+	writer, _ := zstd.NewWriter(nil, opts...)
 	return writer
 }
 
@@ -85,4 +109,5 @@ func (z Zstd) NewEncoder() encode.Encoder {
 var (
 	_ encode.Encoding       = (*Zstd)(nil)
 	_ caddyfile.Unmarshaler = (*Zstd)(nil)
+	_ caddy.Provisioner     = (*Zstd)(nil)
 )
