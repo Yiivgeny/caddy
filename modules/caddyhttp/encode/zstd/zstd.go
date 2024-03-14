@@ -15,6 +15,8 @@
 package caddyzstd
 
 import (
+	"fmt"
+
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/caddyserver/caddy/v2"
@@ -49,13 +51,8 @@ func (z *Zstd) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 		return nil
 	}
 	levelStr := d.Val()
-	if ok, _ := zstd.EncoderLevelFromString(levelStr); !ok {
-		return d.Errf("unexpected compression level, use one of '%s', '%s', '%s', '%s'",
-			zstd.SpeedFastest,
-			zstd.SpeedDefault,
-			zstd.SpeedBetterCompression,
-			zstd.SpeedBestCompression,
-		)
+	if _, err := encoderLevelFromString(levelStr); err != nil {
+		return d.WrapErr(err)
 	}
 
 	z.Level = levelStr
@@ -64,7 +61,12 @@ func (z *Zstd) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 
 // Provision provisions z's configuration.
 func (z *Zstd) Provision(ctx caddy.Context) error {
-	_, z.level = zstd.EncoderLevelFromString(z.Level)
+	level, err := encoderLevelFromString(z.Level)
+	if err != nil {
+		return err
+	}
+
+	z.level = level
 	return nil
 }
 
@@ -85,6 +87,18 @@ func (z Zstd) NewEncoder() encode.Encoder {
 		zstd.WithEncoderLevel(z.level),
 	)
 	return writer
+}
+
+func encoderLevelFromString(s string) (zstd.EncoderLevel, error) {
+	if ok, level := zstd.EncoderLevelFromString(s); ok {
+		return level, nil
+	}
+	return zstd.SpeedDefault, fmt.Errorf("unexpected compression level, use one of '%s', '%s', '%s', '%s'",
+		zstd.SpeedFastest,
+		zstd.SpeedDefault,
+		zstd.SpeedBetterCompression,
+		zstd.SpeedBestCompression,
+	)
 }
 
 // Interface guards
